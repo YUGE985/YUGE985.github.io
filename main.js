@@ -4,6 +4,9 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
+/* ============================================================
+   GLSL: Simplex Noise 3D
+   ============================================================ */
 const noiseGLSL = `
 vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}
 vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}
@@ -53,6 +56,9 @@ float snoise(vec3 v){
 }
 `;
 
+/* ============================================================
+   中心变形几何体 — 着色器
+   ============================================================ */
 const coreVertex = `
 ${noiseGLSL}
 uniform float uTime;
@@ -61,12 +67,14 @@ uniform float uNoiseStrength;
 varying float vDisplacement;
 varying vec3 vNormalW;
 varying vec3 vViewPos;
+
 void main(){
   float n1=snoise(position*uNoiseScale+uTime*0.25);
   float n2=snoise(position*uNoiseScale*2.3+uTime*0.4)*0.5;
   float n3=snoise(position*uNoiseScale*0.5+uTime*0.15)*0.7;
   float displacement=(n1+n2+n3)*uNoiseStrength;
   vDisplacement=displacement;
+
   vec3 newPos=position+normal*displacement;
   vec4 mvPos=modelViewMatrix*vec4(newPos,1.0);
   vViewPos=-mvPos.xyz;
@@ -80,24 +88,35 @@ uniform float uTime;
 varying float vDisplacement;
 varying vec3 vNormalW;
 varying vec3 vViewPos;
+
 void main(){
   float t=vDisplacement*1.8+0.5;
-  vec3 cPurple=vec3(0.62,0.50,0.98);
-  vec3 cPink=vec3(0.96,0.42,0.68);
-  vec3 cBlue=vec3(0.35,0.60,0.98);
-  vec3 cCyan=vec3(0.18,0.82,0.68);
+
+  vec3 cPurple =vec3(0.62,0.50,0.98);
+  vec3 cPink   =vec3(0.96,0.42,0.68);
+  vec3 cBlue   =vec3(0.35,0.60,0.98);
+  vec3 cCyan   =vec3(0.18,0.82,0.68);
+
   vec3 col=mix(cPurple,cPink,smoothstep(-0.25,0.25,t));
   col=mix(col,cBlue,smoothstep(0.0,0.55,t+sin(uTime*0.4)*0.15));
   col=mix(col,cCyan,smoothstep(0.25,0.75,t*0.5+0.3));
+
+  // Fresnel edge glow
   vec3 V=normalize(vViewPos);
   float fres=pow(1.0-max(dot(V,vNormalW),0.0),2.2);
   col+=fres*vec3(0.45,0.65,1.0)*1.1;
+
+  // Inner glow from displacement
   float glow=0.55+vDisplacement*1.6;
   col*=glow;
+
   gl_FragColor=vec4(col,1.0);
 }
 `;
 
+/* ============================================================
+   粒子着色器（星云 / 光环 / 星空通用）
+   ============================================================ */
 const particleVertex = `
 attribute float aSize;
 attribute vec3 aColor;
@@ -106,6 +125,7 @@ uniform float uTime;
 uniform float uPixelRatio;
 varying vec3 vColor;
 varying float vAlpha;
+
 void main(){
   vColor=aColor;
   vec3 pos=position;
@@ -128,166 +148,290 @@ void main(){
 }
 `;
 
+/* ============================================================
+   初始化
+   ============================================================ */
 const canvas = document.getElementById('scene');
 const loader = document.getElementById('loader');
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x020108, 0.018);
 
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
+const camera = new THREE.PerspectiveCamera(
+  60, window.innerWidth / window.innerHeight, 0.1, 200
+);
 camera.position.set(0, 0.5, 11);
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({
+    canvas, antialias: true, alpha: false
+  });
+} catch (err) {
+  loader.classList.add('hidden');
+  const fallback = document.createElement('div');
+  fallback.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#c4b5fd;font-size:18px;line-height:1.8;text-align:center;padding:24px;z-index:50;';
+  fallback.innerHTML = '<div style="font-size:22px;margin-bottom:12px;">当前浏览器不支持 WebGL</div>无法渲染 3D 星云<br><br>请使用最新版 Chrome / Safari / Edge<br>或开启硬件加速后重试';
+  document.body.appendChild(fallback);
+  throw err;
+}
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 
+/* ============================================================
+   后处理 — Bloom
+   ============================================================ */
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.1, 0.7, 0.0);
+
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  1.1,   // strength
+  0.7,   // radius
+  0.0    // threshold
+);
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
 
+/* ============================================================
+   中心变形几何体
+   ============================================================ */
 const coreGeo = new THREE.IcosahedronGeometry(2.2, 64);
 const coreMat = new THREE.ShaderMaterial({
   vertexShader: coreVertex,
   fragmentShader: coreFragment,
-  uniforms: { uTime: { value: 0 }, uNoiseScale: { value: 0.55 }, uNoiseStrength: { value: 0.55 } }
+  uniforms: {
+    uTime:          { value: 0 },
+    uNoiseScale:    { value: 0.55 },
+    uNoiseStrength: { value: 0.55 }
+  }
 });
 const core = new THREE.Mesh(coreGeo, coreMat);
 scene.add(core);
 
+// 内核外的线框层
 const wireGeo = new THREE.IcosahedronGeometry(2.25, 2);
-const wireMat = new THREE.MeshBasicMaterial({ color: 0x8b7cf6, wireframe: true, transparent: true, opacity: 0.08 });
+const wireMat = new THREE.MeshBasicMaterial({
+  color: 0x8b7cf6, wireframe: true, transparent: true, opacity: 0.08
+});
 const wireframe = new THREE.Mesh(wireGeo, wireMat);
 scene.add(wireframe);
 
+/* ============================================================
+   粒子星云
+   ============================================================ */
 function createNebula(count, innerR, outerR) {
   const geo = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
-  const sizes = new Float32Array(count);
-  const offsets = new Float32Array(count);
-  const palette = [new THREE.Color(0xa78bfa), new THREE.Color(0xf472b6), new THREE.Color(0x60a5fa), new THREE.Color(0x34d399), new THREE.Color(0xfbbf24)];
+  const colors    = new Float32Array(count * 3);
+  const sizes     = new Float32Array(count);
+  const offsets   = new Float32Array(count);
+
+  const palette = [
+    new THREE.Color(0xa78bfa),
+    new THREE.Color(0xf472b6),
+    new THREE.Color(0x60a5fa),
+    new THREE.Color(0x34d399),
+    new THREE.Color(0xfbbf24)
+  ];
+
   for (let i = 0; i < count; i++) {
+    // 球壳分布
     const r = innerR + Math.random() * (outerR - innerR);
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
-    positions[i*3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i*3]   = r * Math.sin(phi) * Math.cos(theta);
     positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
     positions[i*3+2] = r * Math.cos(phi);
+
     const c = palette[Math.floor(Math.random() * palette.length)];
-    colors[i*3] = c.r; colors[i*3+1] = c.g; colors[i*3+2] = c.b;
-    sizes[i] = Math.random() * 2.5 + 0.8;
+    colors[i*3]   = c.r;
+    colors[i*3+1] = c.g;
+    colors[i*3+2] = c.b;
+
+    sizes[i]   = Math.random() * 2.5 + 0.8;
     offsets[i] = Math.random();
   }
+
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
-  geo.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
-  geo.setAttribute('aOffset', new THREE.BufferAttribute(offsets, 1));
+  geo.setAttribute('aColor',   new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute('aSize',    new THREE.BufferAttribute(sizes, 1));
+  geo.setAttribute('aOffset',  new THREE.BufferAttribute(offsets, 1));
+
   const mat = new THREE.ShaderMaterial({
-    vertexShader: particleVertex, fragmentShader: particleFragment,
-    uniforms: { uTime: { value: 0 }, uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) } },
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+    vertexShader: particleVertex,
+    fragmentShader: particleFragment,
+    uniforms: {
+      uTime:       { value: 0 },
+      uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) }
+    },
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
   });
+
   return new THREE.Points(geo, mat);
 }
+
 const nebula = createNebula(6000, 4, 14);
 scene.add(nebula);
 
+/* ============================================================
+   粒子光环（3 个不同角度）
+   ============================================================ */
 function createRing(count, radius, width, colorHex, tiltX, tiltZ) {
   const geo = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
-  const sizes = new Float32Array(count);
-  const offsets = new Float32Array(count);
+  const colors    = new Float32Array(count * 3);
+  const sizes     = new Float32Array(count);
+  const offsets   = new Float32Array(count);
   const baseColor = new THREE.Color(colorHex);
+
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
     const r = radius + (Math.random() - 0.5) * width;
-    positions[i*3] = Math.cos(angle) * r;
+    positions[i*3]   = Math.cos(angle) * r;
     positions[i*3+1] = (Math.random() - 0.5) * width * 0.3;
     positions[i*3+2] = Math.sin(angle) * r;
+
     const variation = 0.7 + Math.random() * 0.6;
-    colors[i*3] = baseColor.r * variation;
+    colors[i*3]   = baseColor.r * variation;
     colors[i*3+1] = baseColor.g * variation;
     colors[i*3+2] = baseColor.b * variation;
-    sizes[i] = Math.random() * 2 + 0.6;
+
+    sizes[i]   = Math.random() * 2 + 0.6;
     offsets[i] = Math.random();
   }
+
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
-  geo.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
-  geo.setAttribute('aOffset', new THREE.BufferAttribute(offsets, 1));
+  geo.setAttribute('aColor',   new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute('aSize',    new THREE.BufferAttribute(sizes, 1));
+  geo.setAttribute('aOffset',  new THREE.BufferAttribute(offsets, 1));
+
   const mat = new THREE.ShaderMaterial({
-    vertexShader: particleVertex, fragmentShader: particleFragment,
-    uniforms: { uTime: { value: 0 }, uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) } },
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+    vertexShader: particleVertex,
+    fragmentShader: particleFragment,
+    uniforms: {
+      uTime:       { value: 0 },
+      uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) }
+    },
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
   });
+
   const points = new THREE.Points(geo, mat);
   points.rotation.x = tiltX;
   points.rotation.z = tiltZ;
   return points;
 }
+
 const ring1 = createRing(2500, 5.5, 1.2, 0xa78bfa, 0.5, 0.2);
 const ring2 = createRing(2000, 7.0, 0.8, 0xf472b6, -0.3, 0.6);
 const ring3 = createRing(1800, 8.5, 1.5, 0x60a5fa, 0.8, -0.4);
 scene.add(ring1, ring2, ring3);
 
+/* ============================================================
+   背景星空
+   ============================================================ */
 function createStarfield(count) {
   const geo = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
-  const sizes = new Float32Array(count);
-  const offsets = new Float32Array(count);
+  const colors    = new Float32Array(count * 3);
+  const sizes     = new Float32Array(count);
+  const offsets   = new Float32Array(count);
+
   for (let i = 0; i < count; i++) {
     const r = 40 + Math.random() * 60;
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
-    positions[i*3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i*3]   = r * Math.sin(phi) * Math.cos(theta);
     positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
     positions[i*3+2] = r * Math.cos(phi);
+
     const c = new THREE.Color().setHSL(0.6 + Math.random() * 0.15, 0.3, 0.7 + Math.random() * 0.3);
-    colors[i*3] = c.r; colors[i*3+1] = c.g; colors[i*3+2] = c.b;
-    sizes[i] = Math.random() * 1.5 + 0.3;
+    colors[i*3]   = c.r;
+    colors[i*3+1] = c.g;
+    colors[i*3+2] = c.b;
+
+    sizes[i]   = Math.random() * 1.5 + 0.3;
     offsets[i] = Math.random();
   }
+
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
-  geo.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
-  geo.setAttribute('aOffset', new THREE.BufferAttribute(offsets, 1));
+  geo.setAttribute('aColor',   new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute('aSize',    new THREE.BufferAttribute(sizes, 1));
+  geo.setAttribute('aOffset',  new THREE.BufferAttribute(offsets, 1));
+
   const mat = new THREE.ShaderMaterial({
-    vertexShader: particleVertex, fragmentShader: particleFragment,
-    uniforms: { uTime: { value: 0 }, uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) } },
-    transparent: true, depthWrite: false
+    vertexShader: particleVertex,
+    fragmentShader: particleFragment,
+    uniforms: {
+      uTime:       { value: 0 },
+      uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) }
+    },
+    transparent: true,
+    depthWrite: false
   });
+
   return new THREE.Points(geo, mat);
 }
+
 const starfield = createStarfield(2500);
 scene.add(starfield);
 
+/* ============================================================
+   漂浮几何体（小八面体 / 四面体）
+   ============================================================ */
 const floaters = [];
 const floaterColors = [0xa78bfa, 0xf472b6, 0x60a5fa, 0x34d399];
 for (let i = 0; i < 14; i++) {
   const size = 0.12 + Math.random() * 0.25;
-  const geo = Math.random() > 0.5 ? new THREE.OctahedronGeometry(size, 0) : new THREE.TetrahedronGeometry(size, 0);
-  const mat = new THREE.MeshBasicMaterial({ color: floaterColors[i % floaterColors.length], transparent: true, opacity: 0.5 + Math.random() * 0.3, wireframe: Math.random() > 0.5 });
+  const geo = Math.random() > 0.5
+    ? new THREE.OctahedronGeometry(size, 0)
+    : new THREE.TetrahedronGeometry(size, 0);
+  const mat = new THREE.MeshBasicMaterial({
+    color: floaterColors[i % floaterColors.length],
+    transparent: true,
+    opacity: 0.5 + Math.random() * 0.3,
+    wireframe: Math.random() > 0.5
+  });
   const mesh = new THREE.Mesh(geo, mat);
+
   const r = 5 + Math.random() * 8;
   const theta = Math.random() * Math.PI * 2;
   const phi = Math.acos(2 * Math.random() - 1);
-  mesh.position.set(r * Math.sin(phi) * Math.cos(theta), r * Math.sin(phi) * Math.sin(theta), r * Math.cos(phi));
-  mesh.userData = { rotSpeed: new THREE.Vector3((Math.random()-0.5)*0.02, (Math.random()-0.5)*0.02, (Math.random()-0.5)*0.02), floatSpeed: 0.3 + Math.random() * 0.5, floatOffset: Math.random() * Math.PI * 2, baseY: mesh.position.y };
+  mesh.position.set(
+    r * Math.sin(phi) * Math.cos(theta),
+    r * Math.sin(phi) * Math.sin(theta),
+    r * Math.cos(phi)
+  );
+  mesh.userData = {
+    rotSpeed: new THREE.Vector3(
+      (Math.random()-0.5)*0.02,
+      (Math.random()-0.5)*0.02,
+      (Math.random()-0.5)*0.02
+    ),
+    floatSpeed: 0.3 + Math.random() * 0.5,
+    floatOffset: Math.random() * Math.PI * 2,
+    baseY: mesh.position.y
+  };
   scene.add(mesh);
   floaters.push(mesh);
 }
 
+/* ============================================================
+   鼠标交互
+   ============================================================ */
 const mouse = { x: 0, y: 0, tx: 0, ty: 0 };
 window.addEventListener('pointermove', (e) => {
   mouse.tx = (e.clientX / window.innerWidth) * 2 - 1;
   mouse.ty = -(e.clientY / window.innerHeight) * 2 + 1;
 });
+
+// 触摸支持
 window.addEventListener('touchmove', (e) => {
   if (e.touches.length > 0) {
     mouse.tx = (e.touches[0].clientX / window.innerWidth) * 2 - 1;
@@ -295,48 +439,77 @@ window.addEventListener('touchmove', (e) => {
   }
 }, { passive: true });
 
+/* ============================================================
+   动画循环
+   ============================================================ */
 const clock = new THREE.Clock();
+let frameId;
+
 function animate() {
-  requestAnimationFrame(animate);
+  frameId = requestAnimationFrame(animate);
   const t = clock.getElapsedTime();
+
+  // 平滑鼠标
   mouse.x += (mouse.tx - mouse.x) * 0.04;
   mouse.y += (mouse.ty - mouse.y) * 0.04;
+
+  // 相机视差
   camera.position.x = mouse.x * 2.5;
   camera.position.y = 0.5 + mouse.y * 1.8;
   camera.lookAt(0, 0, 0);
+
+  // 中心几何体
   coreMat.uniforms.uTime.value = t;
   core.rotation.y = t * 0.08;
   core.rotation.x = Math.sin(t * 0.15) * 0.15;
+
+  // 线框层反向旋转
   wireframe.rotation.y = -t * 0.05;
   wireframe.rotation.x = t * 0.03;
+
+  // 星云缓慢旋转
   nebula.rotation.y = t * 0.02;
   nebula.rotation.x = t * 0.008;
   nebula.material.uniforms.uTime.value = t;
+
+  // 光环旋转（不同速度）
   ring1.rotation.y = t * 0.06;
   ring2.rotation.y = -t * 0.04;
   ring3.rotation.y = t * 0.03;
   ring1.material.uniforms.uTime.value = t;
   ring2.material.uniforms.uTime.value = t;
   ring3.material.uniforms.uTime.value = t;
+
+  // 星空
   starfield.rotation.y = t * 0.005;
   starfield.material.uniforms.uTime.value = t;
+
+  // 漂浮几何体
   for (const f of floaters) {
     f.rotation.x += f.userData.rotSpeed.x;
     f.rotation.y += f.userData.rotSpeed.y;
     f.rotation.z += f.userData.rotSpeed.z;
     f.position.y = f.userData.baseY + Math.sin(t * f.userData.floatSpeed + f.userData.floatOffset) * 0.5;
   }
+
+  // Bloom 强度呼吸
   bloomPass.strength = 1.0 + Math.sin(t * 0.6) * 0.15;
+
   composer.render();
 }
 
+/* ============================================================
+   响应式
+   ============================================================ */
 window.addEventListener('resize', () => {
-  const w = window.innerWidth, h = window.innerHeight;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
   composer.setSize(w, h);
   bloomPass.setSize(w, h);
+
   const pr = Math.min(window.devicePixelRatio, 2);
   nebula.material.uniforms.uPixelRatio.value = pr;
   ring1.material.uniforms.uPixelRatio.value = pr;
@@ -345,5 +518,12 @@ window.addEventListener('resize', () => {
   starfield.material.uniforms.uPixelRatio.value = pr;
 });
 
-setTimeout(() => { loader.classList.add('hidden'); }, 600);
+/* ============================================================
+   启动
+   ============================================================ */
+// 隐藏加载层
+setTimeout(() => {
+  loader.classList.add('hidden');
+}, 600);
+
 animate();
