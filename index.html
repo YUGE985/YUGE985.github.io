@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nebula Drift — 星云漂移</title>
+  <link rel="stylesheet" href="./style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div class="overlay">
+    <h1 class="title">NEBULA&nbsp;DRIFT</h1>
+    <p class="subtitle">星 云 漂 移</p>
+    <p class="hint">移动鼠标 · 探索宇宙</p>
+  </div>
+
+  <div class="loader" id="loader">
+    <div class="loader-ring"></div>
+    <span>正在召唤星云…</span>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
