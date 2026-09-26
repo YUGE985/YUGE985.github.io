@@ -1,39 +1,39 @@
 import {
-  BufferGeometry,
-  Float32BufferAttribute,
-  OrthographicCamera,
-  Mesh
+	BufferGeometry,
+	Float32BufferAttribute,
+	OrthographicCamera,
+	Mesh
 } from 'three';
 
 class Pass {
 
-  constructor() {
+	constructor() {
 
-    this.isPass = true;
+		this.isPass = true;
 
-    // if set to true, the pass is processed by the composer
-    this.enabled = true;
+		// if set to true, the pass is processed by the composer
+		this.enabled = true;
 
-    // if set to true, the pass indicates to swap read and write buffer after rendering
-    this.needsSwap = true;
+		// if set to true, the pass indicates to swap read and write buffer after rendering
+		this.needsSwap = true;
 
-    // if set to true, the pass clears its buffer before rendering
-    this.clear = false;
+		// if set to true, the pass clears its buffer before rendering
+		this.clear = false;
 
-    // if set to true, the result of the pass is rendered to screen. This is set automatically by EffectComposer.
-    this.renderToScreen = false;
+		// if set to true, the result of the pass is rendered to screen. This is set automatically by EffectComposer.
+		this.renderToScreen = false;
 
-  }
+	}
 
-  setSize( /* width, height */ ) {}
+	setSize( /* width, height */ ) {}
 
-  render( /* renderer, writeBuffer, readBuffer, deltaTime, maskActive */ ) {
+	render( /* renderer, writeBuffer, readBuffer, deltaTime, maskActive */ ) {
 
-    console.error( 'THREE.Pass: .render() must be implemented in derived pass.' );
+		console.error( 'THREE.Pass: .render() must be implemented in derived pass.' );
 
-  }
+	}
 
-  dispose() {}
+	dispose() {}
 
 }
 
@@ -45,14 +45,14 @@ const _camera = new OrthographicCamera( - 1, 1, 1, - 1, 0, 1 );
 
 class FullscreenTriangleGeometry extends BufferGeometry {
 
-  constructor() {
+	constructor() {
 
-    super();
+		super();
 
-    this.setAttribute( 'position', new Float32BufferAttribute( [ - 1, 3, 0, - 1, - 1, 0, 3, - 1, 0 ], 3 ) );
-    this.setAttribute( 'uv', new Float32BufferAttribute( [ 0, 2, 0, 0, 2, 0 ], 2 ) );
+		this.setAttribute( 'position', new Float32BufferAttribute( [ - 1, 3, 0, - 1, - 1, 0, 3, - 1, 0 ], 3 ) );
+		this.setAttribute( 'uv', new Float32BufferAttribute( [ 0, 2, 0, 0, 2, 0 ], 2 ) );
 
-  }
+	}
 
 }
 
@@ -60,35 +60,35 @@ const _geometry = new FullscreenTriangleGeometry();
 
 class FullScreenQuad {
 
-  constructor( material ) {
+	constructor( material ) {
 
-    this._mesh = new Mesh( _geometry, material );
+		this._mesh = new Mesh( _geometry, material );
 
-  }
+	}
 
-  dispose() {
+	dispose() {
 
-    this._mesh.geometry.dispose();
+		this._mesh.geometry.dispose();
 
-  }
+	}
 
-  render( renderer ) {
+	render( renderer ) {
 
-    renderer.render( this._mesh, _camera );
+		renderer.render( this._mesh, _camera );
 
-  }
+	}
 
-  get material() {
+	get material() {
 
-    return this._mesh.material;
+		return this._mesh.material;
 
-  }
+	}
 
-  set material( value ) {
+	set material( value ) {
 
-    this._mesh.material = value;
+		this._mesh.material = value;
 
-  }
+	}
 
 }
 
